@@ -28,7 +28,6 @@ st.markdown(
     """
     <style>
     #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
     """,

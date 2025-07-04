@@ -160,8 +160,8 @@ def analyze_flood_risk():
         fig.add_trace(go.Scatter(
             x=recent['Date'], y=recent['discharge_cfs'], mode='lines+markers', name='Discharge'
         ))
-        fig.add_hline(y=p95, line_dash='dash', annotation_text='95th %ile')
-        fig.add_hline(y=p99, line_dash='dashdot', annotation_text='99th %ile')
+        fig.add_hline(y=p95, line_dash='dash', annotation_text='95th Percentile')
+        fig.add_hline(y=p99, line_dash='dashdot', annotation_text='99th Percentile')
         fig.update_layout(title='Discharge (Last 7 Days of available data)', xaxis_title='Date', yaxis_title='cfs')
         st.plotly_chart(fig, use_container_width=True)
 

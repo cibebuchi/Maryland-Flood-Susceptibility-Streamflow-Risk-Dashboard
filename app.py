@@ -100,7 +100,7 @@ def display_risk_map():
     if img_path.exists():
         st.image(str(img_path), use_container_width=True)
         st.markdown(
-            "Risk Scores assigned per USGS station using data from 1970–2025 with up to 95% completeness."
+            "Risk Scores assigned per USGS station using training data from 1970–2025 with up to 95% completeness."
         )
     else:
         st.error("Risk map image not found.")

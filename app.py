@@ -76,7 +76,7 @@ def display_about():
         - **Moderate Risk:** 33–66%
         - **High Risk:** >66%
 
-        **Overflow criteria:**
+        **Overflow criteria based on discharge data over the past 7 days:**
         1. Discharge >95th percentile for ≥2 consecutive days, or
         2. Discharge >99th percentile on ≥2 days total
 
@@ -100,11 +100,10 @@ def display_risk_map():
     if img_path.exists():
         st.image(str(img_path), use_container_width=True)
         st.markdown(
-            "Risk Scores assigned per USGS county using data from 1970–2025 with up to 95% completeness."
+            "Risk Scores assigned per USGS station using data from 1970–2025 with up to 95% completeness."
         )
     else:
         st.error("Risk map image not found.")
-
 
 def analyze_flood_risk():
     st.header("Flood Susceptibility & Overflow Analysis")
@@ -126,14 +125,28 @@ def analyze_flood_risk():
             st.error("No discharge data available.")
             return
 
+        # ─── Normalize, sort, and check staleness ─────────────────────────────────
         df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-        recent = df[df['Date'] >= df['Date'].max() - pd.Timedelta(days=7)]
+        df = df.sort_values('Date')
 
+        max_date  = df['Date'].max()
+        today     = pd.Timestamp.today().normalize()
+        days_diff = (today - max_date).days
+        if days_diff > 14:
+            st.warning(
+                f"Warning: Latest available data is {days_diff} days old "
+                f"(latest date: {max_date.date()}). Data may be outdated."
+            )
+
+        # ─── Define “last 7 days of available data” relative to max_date ─────────
+        recent = df[df['Date'] >= max_date - pd.Timedelta(days=7)]
+
+        # ─── Compute susceptibility, risk, overflow, and display ─────────────────
         score = compute_susceptibility(df, row['dec_long_va'], row['dec_lat_va'])
         level = get_risk_level(score)
 
         p95, p99 = np.percentile(df['discharge_cfs'].dropna(), [95, 99])
-        events = detect_flood_events(df, p95)
+        events   = detect_flood_events(df, p95)
         overflow = any(e[0] for e in events if df['Date'].iloc[e[0]] >= recent['Date'].min())
         overflow |= (recent['discharge_cfs'] > p99).sum() >= 2
 
@@ -142,14 +155,16 @@ def analyze_flood_risk():
         st.markdown(f"**Recent Overflow:** {colored_overflow(overflow)}", unsafe_allow_html=True)
         st.write(f"Data range: {recent['Date'].min().date()} to {recent['Date'].max().date()}")
 
+        # ─── Plot last 7 days of discharge ────────────────────────────────────────
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=recent['Date'], y=recent['discharge_cfs'], mode='lines+markers', name='Discharge'
         ))
         fig.add_hline(y=p95, line_dash='dash', annotation_text='95th %ile')
         fig.add_hline(y=p99, line_dash='dashdot', annotation_text='99th %ile')
-        fig.update_layout(title='Discharge (Last 7 Days)', xaxis_title='Date', yaxis_title='cfs')
+        fig.update_layout(title='Discharge (Last 7 Days of available data)', xaxis_title='Date', yaxis_title='cfs')
         st.plotly_chart(fig, use_container_width=True)
+
 
 # === Main ===
 if mode == "About":

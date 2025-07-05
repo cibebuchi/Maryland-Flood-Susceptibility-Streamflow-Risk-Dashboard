@@ -151,7 +151,7 @@ def analyze_flood_risk():
         overflow |= (recent['discharge_cfs'] > p99).sum() >= 2
 
         st.metric("Probability-based Flood Susceptibility Score using pretrained XAI", f"{score:.3f}")
-        st.markdown(f"**Historical Risk Level:** {colored_risk(level)}", unsafe_allow_html=True)
+        st.markdown(f"**Historical Risk Level based on Susceptibility Score:** {colored_risk(level)}", unsafe_allow_html=True)
         st.markdown(f"**Potential Risk of Recent Overflow:** {colored_overflow(overflow)}", unsafe_allow_html=True)
         st.write(f"Data range: {recent['Date'].min().date()} to {recent['Date'].max().date()}")
 

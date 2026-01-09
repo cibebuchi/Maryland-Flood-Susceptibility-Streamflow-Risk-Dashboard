@@ -13,3 +13,5 @@ rasterio==1.4.3
 
 
 
+openpyxl
+xlrd

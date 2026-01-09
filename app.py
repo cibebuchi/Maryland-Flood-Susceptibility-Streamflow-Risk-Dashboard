@@ -25,9 +25,8 @@ BASE = Path(__file__).parent
 LOGO_PATH = BASE / "logo.png"
 COUNTIES_GEOJSON = BASE / "counties.geojson"
 
-# Files you mentioned (place them in the repo root next to app.py)
-RISK_MAP_HTML = BASE / "interactive_risk_map.html"   # <- put your HTML here
-FLOOD_SUMMARY_XLSX = BASE / "Flood summary.xlsx"     # <- put your Excel here
+RISK_MAP_HTML = BASE / "interactive_risk_map.html"
+FLOOD_SUMMARY_XLSX = BASE / "Flood summary.xlsx"
 
 st.set_page_config(
     page_title="Maryland Flood Risk Dashboard",
@@ -156,7 +155,7 @@ def display_general_about():
 This app provides **real-time** and **historical** flood-risk assessment capabilities for Maryland.
 
 - **Real-time assessment** evaluates USGS streamflow stations to flag **potential stream overflow** based on recent discharge behavior.
-- **Historical assessment** provides **modelled flood susceptibility** using XAI, plus **population and real estate exposure** and a **social vulnerability composite flood risk** at the Census Block Group (CBG) level.
+- **Historical assessment** provides modelled flood susceptibility using XAI, plus **flood composite risk analysis** integrating **population and real estate exposure** and a **social vulnerability index** at the Census Block Group (CBG) level.
 
 **Method reference**  
 Ibebuchi C.C. (2026) *Equity-focused flood risk assessment in Maryland using a hybrid explainable machine learning framework with FEMA and USGS data.* **Natural Hazards.** DOI: 10.1007/s11069-025-07923-8
@@ -187,9 +186,7 @@ def analyze_stations():
     st.subheader("Analyze USGS Stations (Real-time)")
 
     if counties_gdf is None or counties_gdf.empty:
-        st.error(
-            "Could not load counties. Ensure `counties.geojson` exists in your repository root next to `app.py`."
-        )
+        st.error("Could not load counties. Ensure `counties.geojson` exists next to `app.py`.")
         return
 
     county = st.selectbox("Select Maryland County", sorted(counties_gdf["NAME_2"].unique()))
@@ -215,30 +212,23 @@ def analyze_stations():
         df = df.copy()
         df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
 
-        # Recent window for overflow detection
         recent = df[df["Date"] >= df["Date"].max() - pd.Timedelta(days=7)].copy()
         if recent.empty:
             st.error("Recent window is empty (no data in the last 7 days).")
             return
 
-        # Modelled susceptibility
         score = compute_susceptibility(df, row["dec_long_va"], row["dec_lat_va"])
         level = get_risk_level(score)
 
-        # Percentile thresholds from the full available record
         discharge = df["discharge_cfs"].dropna().to_numpy()
         p95, p99 = np.percentile(discharge, [95, 99])
 
-        # Flood-event detection using your existing helper
         events = detect_flood_events(df, p95)
 
-        # Was there any detected event that starts inside the recent window?
         overflow = any(
             (idx0 is not None) and (df["Date"].iloc[int(idx0)] >= recent["Date"].min())
             for (idx0, *_rest) in events
         )
-
-        # Additional criterion: >=2 days above 99th percentile in recent window
         overflow = bool(overflow) or ((recent["discharge_cfs"] > p99).sum() >= 2)
 
         c1, c2, c3 = st.columns(3)
@@ -259,11 +249,7 @@ def analyze_stations():
         )
         fig.add_hline(y=float(p95), line_dash="dash", annotation_text="95th %ile")
         fig.add_hline(y=float(p99), line_dash="dashdot", annotation_text="99th %ile")
-        fig.update_layout(
-            title="Discharge (Last 7 Days)",
-            xaxis_title="Date",
-            yaxis_title="cfs",
-        )
+        fig.update_layout(title="Discharge (Last 7 Days)", xaxis_title="Date", yaxis_title="cfs")
         st.plotly_chart(fig, use_container_width=True)
 
 def historical_risk_map():
@@ -272,12 +258,8 @@ def historical_risk_map():
     if RISK_MAP_HTML.exists():
         html = RISK_MAP_HTML.read_text(encoding="utf-8", errors="ignore")
         components.html(html, height=780, scrolling=True)
-        st.caption("If the map does not render correctly, ensure the HTML is self-contained (no missing local JS/CSS files).")
     else:
-        st.warning(
-            "Could not find `interactive_risk_map.html` in the repository root. "
-            "Add it next to `app.py`, or upload it below for a quick test."
-        )
+        st.warning("Could not find `interactive_risk_map.html` next to `app.py`.")
         upl = st.file_uploader("Upload interactive_risk_map.html", type=["html"])
         if upl is not None:
             html = upl.read().decode("utf-8", errors="ignore")
@@ -286,7 +268,6 @@ def historical_risk_map():
 def county_summary():
     st.subheader("County Summary (Historical Assessment)")
 
-    # Load from repo if available, else allow upload
     data_book = None
     if FLOOD_SUMMARY_XLSX.exists():
         try:
@@ -296,20 +277,12 @@ def county_summary():
             data_book = None
 
     if data_book is None:
-        st.warning(
-            "Could not find `Flood summary.xlsx` in the repository root. "
-            "Add it next to `app.py`, or upload it below for a quick test."
-        )
+        st.warning("Could not find `Flood summary.xlsx` next to `app.py`.")
         upl = st.file_uploader("Upload Flood summary.xlsx", type=["xlsx"])
         if upl is None:
             return
-        try:
-            data_book = load_excel(Path(upl.name))  # dummy path for cache key
-        except Exception:
-            # Fallback: read directly from bytes
-            data_book = {"Uploaded": pd.read_excel(upl)}
+        data_book = {"Uploaded": pd.read_excel(upl)}
 
-    # Choose a sheet (if multiple)
     sheet_names = list(data_book.keys())
     sheet = st.selectbox("Select Excel sheet", sheet_names, index=0)
     df_raw = data_book[sheet]
@@ -321,9 +294,9 @@ def county_summary():
     metric_map = {}
 
     if "high_risk_pct" in df.columns:
-        metric_map["High-risk CBGs (%)"] = ("high_risk_pct", "Percent of CBGs in high-risk class")
+        metric_map["High-risk CBGs (%)"] = ("high_risk_pct", "Percent of CBGs where composite risk exceeds 70%")
     if "high_risk_cbgs" in df.columns:
-        metric_map["High-risk CBG count"] = ("high_risk_cbgs", "Number of high-risk CBGs")
+        metric_map["High-risk CBG count"] = ("high_risk_cbgs", "Number of CBGs where composite risk exceeds 70%")
     if "total_home_value" in df.columns:
         metric_map["Total home value ($)"] = ("total_home_value", "Total home value (as provided in the sheet)")
     if "total_population" in df.columns:
@@ -381,13 +354,6 @@ def county_summary():
         plot_df[metric_col] = pd.to_numeric(plot_df[metric_col], errors="coerce")
         plot_df = plot_df.dropna(subset=[metric_col])
 
-        try:
-            plot_df["_risk_num"] = pd.to_numeric(plot_df["risk_level"], errors="coerce")
-            if plot_df["_risk_num"].notna().any():
-                plot_df = plot_df.sort_values("_risk_num")
-        except Exception:
-            pass
-
         fig = go.Figure()
         fig.add_trace(
             go.Bar(
@@ -410,10 +376,9 @@ def county_summary():
 
     st.markdown(
         """
-**Note on interpretation**  
-The app plots the columns exactly as provided in the Excel file. If you intend “total_home_value” and “total_population”
-to represent *only* high-risk CBGs (exposure in high-risk areas), ensure the sheet is prepared that way or include explicit
-columns like `high_risk_home_value` and `high_risk_population`.
+### Note on interpretation
+Flood risk per CBG is calculated as the product of **Predicted Flood Susceptibility**, **Social Vulnerability**, and **Population Count**.  
+**High-risk CBGs** are those where the **composite risk exceeds 70%**. Counties with **no CBGs** above this threshold were not included.
         """
     )
 
@@ -439,4 +404,22 @@ else:
     with tab_county:
         county_summary()
 
-st.markdown("<hr><p style='text-align:center;color:#888;'>Created by Chibuike Ibebuchi</p>", unsafe_allow_html=True)
+# ============================================================
+# Footer (UPDATED)
+# ============================================================
+st.markdown(
+    """
+<hr>
+<div style="text-align:center; color:#888; font-size:14px; line-height:1.6;">
+  <div>Created by Chibuike Ibebuchi <span style="color:#777;">(Contact: chibuike.ibebuchi@morgan.edu)</span></div>
+  <div>
+    Managed by <b>MerieAnalytics</b> — 
+    <a href="https://www.linkedin.com/company/merie-analytics/posts/?feedView=all" target="_blank" rel="noopener noreferrer">
+      Visit us on LinkedIn
+    </a>
+  </div>
+  <div>© MerieAnalytics 2026</div>
+</div>
+    """,
+    unsafe_allow_html=True,
+)

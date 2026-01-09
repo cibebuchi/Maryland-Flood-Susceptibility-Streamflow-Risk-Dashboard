@@ -48,21 +48,29 @@ st.markdown(
 )
 
 # ============================================================
-# Sidebar
+# Navigation (FIXED FOR MOBILE)
 # ============================================================
+SECTIONS = [
+    "Assess potential stream overflow in real time",
+    "Historical Flood Risk Assessment",
+    "About",
+]
+
+# Top navigation: always visible on mobile
+section = st.selectbox("Navigate", SECTIONS, index=0)
+
+# Helpful mobile hint (kept minimal)
+st.caption("📱 Mobile tip: use the 'Navigate' dropdown above (or open the sidebar) to switch sections.")
+
+# Sidebar navigation (kept as-is)
 if LOGO_PATH.exists():
     st.sidebar.image(str(LOGO_PATH), use_container_width=True)
 
 st.sidebar.title("Navigation")
+section_sidebar = st.sidebar.radio("Select Section", SECTIONS, index=SECTIONS.index(section))
 
-section = st.sidebar.radio(
-    "Select Section",
-    [
-        "Assess potential stream overflow in real time",
-        "Historical Flood Risk Assessment",
-        "About",
-    ],
-)
+# If user picks something in sidebar, that should win
+section = section_sidebar
 
 # ============================================================
 # Data Loading

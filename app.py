@@ -48,29 +48,21 @@ st.markdown(
 )
 
 # ============================================================
-# Navigation (FIXED FOR MOBILE)
+# Sidebar
 # ============================================================
-SECTIONS = [
-    "Assess potential stream overflow in real time",
-    "Historical Flood Risk Assessment",
-    "About",
-]
-
-# Top navigation: always visible on mobile
-section = st.selectbox("Navigate", SECTIONS, index=0)
-
-# Helpful mobile hint (kept minimal)
-st.caption("📱 Mobile tip: use the 'Navigate' dropdown above (or open the sidebar) to switch sections.")
-
-# Sidebar navigation (kept as-is)
 if LOGO_PATH.exists():
     st.sidebar.image(str(LOGO_PATH), use_container_width=True)
 
 st.sidebar.title("Navigation")
-section_sidebar = st.sidebar.radio("Select Section", SECTIONS, index=SECTIONS.index(section))
 
-# If user picks something in sidebar, that should win
-section = section_sidebar
+section = st.sidebar.radio(
+    "Select Section",
+    [
+        "Assess potential stream overflow in real time",
+        "Historical Flood Risk Assessment",
+        "About",
+    ],
+)
 
 # ============================================================
 # Data Loading
@@ -149,9 +141,12 @@ def fmt_compact(x):
         return f"{x/1e6:.1f}M"
     if ax >= 1e3:
         return f"{x/1e3:.1f}K"
-    if ax.is_integer():
+    if float(x).is_integer():
         return f"{int(x)}"
     return f"{x:.2f}"
+
+def _to_num(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
 
 # ============================================================
 # Pages / Sections
@@ -263,19 +258,60 @@ def analyze_stations():
 def historical_risk_map():
     st.subheader("Interactive Flood Risk Map (Historical Assessment)")
 
-    if RISK_MAP_HTML.exists():
-        html = RISK_MAP_HTML.read_text(encoding="utf-8", errors="ignore")
-        components.html(html, height=780, scrolling=True)
-    else:
+    if not RISK_MAP_HTML.exists():
         st.warning("Could not find `interactive_risk_map.html` next to `app.py`.")
         upl = st.file_uploader("Upload interactive_risk_map.html", type=["html"])
         if upl is not None:
             html = upl.read().decode("utf-8", errors="ignore")
             components.html(html, height=780, scrolling=True)
+        return
+
+    # IMPORTANT NOTE (honest):
+    # You cannot *fully* prevent downloading/saving in a web app (users can always screenshot or view source),
+    # but we can DETER casual downloads by disabling right-click + common save shortcuts inside the embedded HTML.
+    raw = RISK_MAP_HTML.read_text(encoding="utf-8", errors="ignore")
+
+    deter = """
+    <style>
+      html, body { user-select: none; -webkit-user-select: none; -ms-user-select: none; }
+    </style>
+    <script>
+      // Disable right click
+      document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+      // Disable common save/view-source shortcuts (best-effort)
+      document.addEventListener('keydown', function(e){
+        const k = (e.key || '').toLowerCase();
+        const ctrl = e.ctrlKey || e.metaKey;
+
+        // Ctrl/Cmd+S (save), Ctrl/Cmd+P (print), Ctrl/Cmd+U (view source), F12, Ctrl/Cmd+Shift+I (devtools)
+        if ((ctrl && (k === 's' || k === 'p' || k === 'u')) ||
+            (e.keyCode === 123) ||
+            (ctrl && e.shiftKey && (k === 'i' || k === 'j' || k === 'c'))) {
+          e.preventDefault();
+          e.stopPropagation();
+          return false;
+        }
+      }, true);
+    </script>
+    """
+
+    # Inject deterrents just after <head> if present, else prepend
+    if "<head" in raw.lower():
+        # naive insertion: place after first <head...>
+        lower = raw.lower()
+        idx = lower.find("<head")
+        idx2 = lower.find(">", idx)
+        html = raw[: idx2 + 1] + deter + raw[idx2 + 1 :]
+    else:
+        html = deter + raw
+
+    components.html(html, height=780, scrolling=True)
 
 def county_summary():
     st.subheader("County Summary (Historical Assessment)")
 
+    # Load from repo if available, else allow upload
     data_book = None
     if FLOOD_SUMMARY_XLSX.exists():
         try:
@@ -296,11 +332,16 @@ def county_summary():
     df_raw = data_book[sheet]
     df = _normalize_cols(df_raw)
 
-    st.write("Data preview")
-    st.dataframe(df.head(50), use_container_width=True)
+    # ========================================================
+    # IP/Privacy: HIDE RAW TABLE (no data preview)
+    # ========================================================
+    st.info(
+        "The interface displays **computed summaries and visual analytics**. "
+        "Raw tabular inputs are intentionally not shown."
+    )
 
+    # Build metric map (same logic, but we’ll surface “computed feel”)
     metric_map = {}
-
     if "high_risk_pct" in df.columns:
         metric_map["High-risk CBGs (%)"] = ("high_risk_pct", "Percent of CBGs where composite risk exceeds 70%")
     if "high_risk_cbgs" in df.columns:
@@ -323,6 +364,104 @@ def county_summary():
         )
         return
 
+    # ========================================================
+    # COMPUTED SUMMARY METRICS (statewide aggregates)
+    # ========================================================
+    if "county_name" in df.columns:
+        # coerce numeric cols
+        for col in ["total_cbgs", "high_risk_cbgs", "total_population", "total_home_value",
+                    "high_risk_population", "high_risk_home_value", "high_risk_pct"]:
+            if col in df.columns:
+                df[col] = _to_num(df[col])
+
+        total_cbgs = int(df["total_cbgs"].sum()) if "total_cbgs" in df.columns and df["total_cbgs"].notna().any() else None
+        high_cbgs = int(df["high_risk_cbgs"].sum()) if "high_risk_cbgs" in df.columns and df["high_risk_cbgs"].notna().any() else None
+
+        # Averages / totals where available
+        c1, c2, c3, c4 = st.columns(4)
+
+        if total_cbgs is not None:
+            c1.metric("Total CBGs (included counties)", f"{total_cbgs:,}")
+        else:
+            c1.metric("Total CBGs", "—")
+
+        if high_cbgs is not None:
+            c2.metric("High-risk CBGs", f"{high_cbgs:,}")
+        else:
+            c2.metric("High-risk CBGs", "—")
+
+        if (total_cbgs is not None) and (high_cbgs is not None) and total_cbgs > 0:
+            c3.metric("High-risk share", f"{(100*high_cbgs/total_cbgs):.1f}%")
+        else:
+            c3.metric("High-risk share", "—")
+
+        # Population in high-risk CBGs (if available) else total population
+        if "high_risk_population" in df.columns and df["high_risk_population"].notna().any():
+            c4.metric("Population in high-risk CBGs", f"{int(df['high_risk_population'].sum()):,}")
+        elif "total_population" in df.columns and df["total_population"].notna().any():
+            c4.metric("Total population (included)", f"{int(df['total_population'].sum()):,}")
+        else:
+            c4.metric("Population", "—")
+
+    # ========================================================
+    # TOP COUNTIES (aggregated ranking table)
+    # ========================================================
+    if "county_name" in df.columns:
+        st.markdown("#### County highlights (Top counties)")
+
+        rank_options = []
+        if "high_risk_cbgs" in df.columns:
+            rank_options.append(("High-risk CBG count", "high_risk_cbgs"))
+        if "high_risk_pct" in df.columns:
+            rank_options.append(("High-risk CBGs (%)", "high_risk_pct"))
+        if "high_risk_population" in df.columns:
+            rank_options.append(("Population in high-risk CBGs", "high_risk_population"))
+        if "high_risk_home_value" in df.columns:
+            rank_options.append(("Home value in high-risk CBGs ($)", "high_risk_home_value"))
+        if "total_population" in df.columns:
+            rank_options.append(("Total population", "total_population"))
+        if "total_home_value" in df.columns:
+            rank_options.append(("Total home value ($)", "total_home_value"))
+
+        if rank_options:
+            label_to_col = {a: b for a, b in rank_options}
+            rank_by = st.selectbox("Rank counties by", list(label_to_col.keys()), index=0)
+            rank_col = label_to_col[rank_by]
+
+            top_n = st.slider("Show Top N", 5, 24, 10)
+            tmp = df.dropna(subset=["county_name"]).copy()
+            tmp[rank_col] = _to_num(tmp[rank_col])
+            tmp = tmp.dropna(subset=[rank_col]).sort_values(rank_col, ascending=False).head(top_n)
+
+            show_cols = ["county_name", rank_col]
+            for extra in ["high_risk_cbgs", "high_risk_pct", "total_cbgs", "total_population"]:
+                if extra in tmp.columns and extra not in show_cols:
+                    show_cols.append(extra)
+
+            disp = tmp[show_cols].rename(columns={
+                "county_name": "County",
+                "total_cbgs": "Total CBGs",
+                "high_risk_cbgs": "High-risk CBGs",
+                "high_risk_pct": "High-risk (%)",
+                "total_population": "Total population",
+                "total_home_value": "Total home value ($)",
+                "high_risk_population": "High-risk population",
+                "high_risk_home_value": "High-risk home value ($)",
+                rank_col: rank_by
+            })
+
+            # Format numeric columns nicely
+            for c in disp.columns:
+                if c != "County":
+                    disp[c] = disp[c].apply(fmt_compact)
+
+            st.table(disp)
+        else:
+            st.caption("No ranking fields detected for the selected sheet.")
+
+    # ========================================================
+    # Interactive plotting (same as before, but using computed table only)
+    # ========================================================
     st.markdown("#### Interactive plotting")
 
     metric_label = st.selectbox("Select metric to plot", list(metric_map.keys()))
@@ -336,7 +475,7 @@ def county_summary():
         plot_df = plot_df.dropna(subset=[metric_col])
 
         if x_mode == "Top-N counties":
-            n = st.slider("N", 5, 24, 10)
+            n = st.slider("N", 5, 24, 10, key="plot_top_n")
             plot_df = plot_df.sort_values(metric_col, ascending=False).head(n)
 
         fig = go.Figure()

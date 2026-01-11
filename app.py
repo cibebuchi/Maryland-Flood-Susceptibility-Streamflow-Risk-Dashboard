@@ -32,7 +32,7 @@ st.set_page_config(
     page_title="Maryland Flood Risk Dashboard",
     page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "🌊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",  # better mobile UX
 )
 
 # Hide Streamlit default menu, header, and footer
@@ -48,21 +48,13 @@ st.markdown(
 )
 
 # ============================================================
-# Sidebar
+# Sidebar (branding only; navigation moved to main tabs for mobile reliability)
 # ============================================================
 if LOGO_PATH.exists():
     st.sidebar.image(str(LOGO_PATH), use_container_width=True)
 
-st.sidebar.title("Navigation")
-
-section = st.sidebar.radio(
-    "Select Section",
-    [
-        "Assess potential stream overflow in real time",
-        "Historical Flood Risk Assessment",
-        "About",
-    ],
-)
+st.sidebar.title("Quick links")
+st.sidebar.caption("Navigation is available at the top of the page (mobile-friendly tabs).")
 
 # ============================================================
 # Data Loading
@@ -149,7 +141,7 @@ def _to_num(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 # ============================================================
-# Pages / Sections
+# Content blocks
 # ============================================================
 def display_general_about():
     st.title("Maryland Flood Risk Dashboard")
@@ -266,9 +258,6 @@ def historical_risk_map():
             components.html(html, height=780, scrolling=True)
         return
 
-    # IMPORTANT NOTE (honest):
-    # You cannot *fully* prevent downloading/saving in a web app (users can always screenshot or view source),
-    # but we can DETER casual downloads by disabling right-click + common save shortcuts inside the embedded HTML.
     raw = RISK_MAP_HTML.read_text(encoding="utf-8", errors="ignore")
 
     deter = """
@@ -276,15 +265,10 @@ def historical_risk_map():
       html, body { user-select: none; -webkit-user-select: none; -ms-user-select: none; }
     </style>
     <script>
-      // Disable right click
       document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
-
-      // Disable common save/view-source shortcuts (best-effort)
       document.addEventListener('keydown', function(e){
         const k = (e.key || '').toLowerCase();
         const ctrl = e.ctrlKey || e.metaKey;
-
-        // Ctrl/Cmd+S (save), Ctrl/Cmd+P (print), Ctrl/Cmd+U (view source), F12, Ctrl/Cmd+Shift+I (devtools)
         if ((ctrl && (k === 's' || k === 'p' || k === 'u')) ||
             (e.keyCode === 123) ||
             (ctrl && e.shiftKey && (k === 'i' || k === 'j' || k === 'c'))) {
@@ -296,9 +280,7 @@ def historical_risk_map():
     </script>
     """
 
-    # Inject deterrents just after <head> if present, else prepend
     if "<head" in raw.lower():
-        # naive insertion: place after first <head...>
         lower = raw.lower()
         idx = lower.find("<head")
         idx2 = lower.find(">", idx)
@@ -311,7 +293,6 @@ def historical_risk_map():
 def county_summary():
     st.subheader("County Summary (Historical Assessment)")
 
-    # Load from repo if available, else allow upload
     data_book = None
     if FLOOD_SUMMARY_XLSX.exists():
         try:
@@ -332,15 +313,9 @@ def county_summary():
     df_raw = data_book[sheet]
     df = _normalize_cols(df_raw)
 
-    # ========================================================
-    # IP/Privacy: HIDE RAW TABLE (no data preview)
-    # ========================================================
-    st.info(
-        "The interface displays **computed summaries and visual analytics**. "
-        "Raw tabular inputs are intentionally not shown."
-    )
+    # More “computed feel” without the sentence you disliked
+    st.caption("Summary analytics are generated from internal risk computations for the selected sheet.")
 
-    # Build metric map (same logic, but we’ll surface “computed feel”)
     metric_map = {}
     if "high_risk_pct" in df.columns:
         metric_map["High-risk CBGs (%)"] = ("high_risk_pct", "Percent of CBGs where composite risk exceeds 70%")
@@ -364,11 +339,8 @@ def county_summary():
         )
         return
 
-    # ========================================================
-    # COMPUTED SUMMARY METRICS (statewide aggregates)
-    # ========================================================
+    # Compute statewide metrics
     if "county_name" in df.columns:
-        # coerce numeric cols
         for col in ["total_cbgs", "high_risk_cbgs", "total_population", "total_home_value",
                     "high_risk_population", "high_risk_home_value", "high_risk_pct"]:
             if col in df.columns:
@@ -377,25 +349,16 @@ def county_summary():
         total_cbgs = int(df["total_cbgs"].sum()) if "total_cbgs" in df.columns and df["total_cbgs"].notna().any() else None
         high_cbgs = int(df["high_risk_cbgs"].sum()) if "high_risk_cbgs" in df.columns and df["high_risk_cbgs"].notna().any() else None
 
-        # Averages / totals where available
         c1, c2, c3, c4 = st.columns(4)
 
-        if total_cbgs is not None:
-            c1.metric("Total CBGs (included counties)", f"{total_cbgs:,}")
-        else:
-            c1.metric("Total CBGs", "—")
-
-        if high_cbgs is not None:
-            c2.metric("High-risk CBGs", f"{high_cbgs:,}")
-        else:
-            c2.metric("High-risk CBGs", "—")
+        c1.metric("Total CBGs (included counties)", f"{total_cbgs:,}" if total_cbgs is not None else "—")
+        c2.metric("High-risk CBGs", f"{high_cbgs:,}" if high_cbgs is not None else "—")
 
         if (total_cbgs is not None) and (high_cbgs is not None) and total_cbgs > 0:
-            c3.metric("High-risk share", f"{(100*high_cbgs/total_cbgs):.1f}%")
+            c3.metric("High-risk share", f"{(100 * high_cbgs / total_cbgs):.1f}%")
         else:
             c3.metric("High-risk share", "—")
 
-        # Population in high-risk CBGs (if available) else total population
         if "high_risk_population" in df.columns and df["high_risk_population"].notna().any():
             c4.metric("Population in high-risk CBGs", f"{int(df['high_risk_population'].sum()):,}")
         elif "total_population" in df.columns and df["total_population"].notna().any():
@@ -403,9 +366,7 @@ def county_summary():
         else:
             c4.metric("Population", "—")
 
-    # ========================================================
-    # TOP COUNTIES (aggregated ranking table)
-    # ========================================================
+    # County highlights
     if "county_name" in df.columns:
         st.markdown("#### County highlights (Top counties)")
 
@@ -450,20 +411,14 @@ def county_summary():
                 rank_col: rank_by
             })
 
-            # Format numeric columns nicely
             for c in disp.columns:
                 if c != "County":
                     disp[c] = disp[c].apply(fmt_compact)
 
             st.table(disp)
-        else:
-            st.caption("No ranking fields detected for the selected sheet.")
 
-    # ========================================================
-    # Interactive plotting (same as before, but using computed table only)
-    # ========================================================
+    # Interactive plotting
     st.markdown("#### Interactive plotting")
-
     metric_label = st.selectbox("Select metric to plot", list(metric_map.keys()))
     metric_col, metric_desc = metric_map[metric_label]
     st.caption(metric_desc)
@@ -518,9 +473,6 @@ def county_summary():
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    else:
-        st.info("This sheet doesn't look like a county table or a risk-level table (missing `county_name` or `risk_level`).")
-
     st.markdown(
         """
 ### Note on interpretation
@@ -530,29 +482,37 @@ Flood risk per CBG is calculated as the product of **Predicted Flood Susceptibil
     )
 
 # ============================================================
-# Render
+# MAIN NAVIGATION (mobile-friendly)
 # ============================================================
-if section == "About":
+tab_rt, tab_hist, tab_about = st.tabs(
+    [
+        "Assess potential stream overflow in real time",
+        "Historical Flood Risk Assessment",
+        "About",
+    ]
+)
+
+with tab_about:
     display_general_about()
 
-elif section == "Assess potential stream overflow in real time":
+with tab_rt:
     st.title("Assess potential stream overflow in real time")
-    tab_method, tab_stations = st.tabs(["Method", "Analyze Stations"])
-    with tab_method:
+    t1, t2 = st.tabs(["Method", "Analyze Stations"])
+    with t1:
         display_method()
-    with tab_stations:
+    with t2:
         analyze_stations()
 
-else:
+with tab_hist:
     st.title("Historical Flood Risk Assessment")
-    tab_map, tab_county = st.tabs(["Flood Risk Map", "County Summary"])
-    with tab_map:
+    m1, m2 = st.tabs(["Flood Risk Map", "County Summary"])
+    with m1:
         historical_risk_map()
-    with tab_county:
+    with m2:
         county_summary()
 
 # ============================================================
-# Footer (UPDATED)
+# Footer
 # ============================================================
 st.markdown(
     """
